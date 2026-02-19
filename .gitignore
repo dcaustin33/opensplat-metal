@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.so
+*.egg-info/
+*.metallib
+*.air
+*.ppm
+build/
+dist/
+output/
+.DS_Store

@@ -91,11 +91,18 @@ def render(
     viewdirs = viewdirs.contiguous()
 
     # 1. SH -> RGB colors
-    sh_coeffs_c = sh_coeffs.contiguous()
+    # The native degree of the coefficients (needed by the kernel for stride computation)
+    native_degree = {1: 0, 4: 1, 9: 2, 16: 3, 25: 4}.get(num_coeffs, 0)
+    # Slice coefficients if rendering at lower degree than stored
+    if degree < native_degree:
+        num_bases_needed = {0: 1, 1: 4, 2: 9, 3: 16, 4: 25}[degree]
+        sh_coeffs_c = sh_coeffs[:, :num_bases_needed, :].contiguous()
+    else:
+        sh_coeffs_c = sh_coeffs.contiguous()
     colors = compute_sh_forward(N, degree, degree, viewdirs, sh_coeffs_c)  # (N, 3)
 
-    # Clamp colors to valid range
-    colors = colors.clamp(min=0.0)
+    # SH evaluation centers around 0; shift to [0, 1] range (standard 3DGS convention)
+    colors = (colors + 0.5).clamp(min=0.0)
 
     # 2. Build projection matrix: projmat = proj @ viewmat
     proj = _projection_matrix(fx, fy, cx, cy, img_width, img_height, device=device)

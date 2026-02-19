@@ -45,8 +45,8 @@ setup(
         CppExtension(
             name="opensplat_metal._C",
             sources=[
-                str(csrc / "ext.mm"),
-                str(csrc / "gsplat_metal.mm"),
+                os.path.join("opensplat_metal", "csrc", "ext.mm"),
+                os.path.join("opensplat_metal", "csrc", "gsplat_metal.mm"),
             ],
             extra_compile_args={
                 "cxx": ["-std=c++17"],

@@ -122,8 +122,12 @@ def extract_gaussians(data, vertex_count, device="mps"):
     return means, quats, scales, sh_coeffs, opacities, sh_degree
 
 
-def make_camera(img_w, img_h, fov_x_deg=60.0, cam_distance=4.0, elevation_deg=30.0, azimuth_deg=45.0, device="mps"):
-    """Create a camera looking at the origin from a given position."""
+def make_camera(img_w, img_h, fov_x_deg=60.0, cam_distance=4.0, elevation_deg=30.0, azimuth_deg=45.0, target=None, device="mps"):
+    """Create a camera orbiting around a target point.
+
+    Uses COLMAP/OpenCV convention: +X right, +Y down, +Z forward (into scene).
+    The view matrix transforms world points into this camera space.
+    """
     fov_x = math.radians(fov_x_deg)
     fx = 0.5 * img_w / math.tan(0.5 * fov_x)
     fy = fx  # square pixels
@@ -136,27 +140,37 @@ def make_camera(img_w, img_h, fov_x_deg=60.0, cam_distance=4.0, elevation_deg=30
         [0.0, 0.0, 1.0],
     ], dtype=torch.float32, device=device)
 
-    # Camera position in world space
+    if target is None:
+        target = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+
+    # Camera position: orbit around target
+    # Elevation rotates up from the horizontal plane, azimuth rotates around y-axis
+    # Using y-up convention (common in 3DGS scenes from COLMAP)
     elev = math.radians(elevation_deg)
     azim = math.radians(azimuth_deg)
-    cam_x = cam_distance * math.cos(elev) * math.cos(azim)
-    cam_y = cam_distance * math.cos(elev) * math.sin(azim)
-    cam_z = cam_distance * math.sin(elev)
-    cam_pos = np.array([cam_x, cam_y, cam_z], dtype=np.float64)
+    cam_x = cam_distance * math.cos(elev) * math.sin(azim)
+    cam_y = -cam_distance * math.sin(elev)
+    cam_z = cam_distance * math.cos(elev) * math.cos(azim)
+    cam_pos = target + np.array([cam_x, cam_y, cam_z], dtype=np.float64)
 
-    # Look at origin
-    target = np.array([0.0, 0.0, 0.0], dtype=np.float64)
+    # Look-at: camera Z points from camera toward target
     forward = target - cam_pos
     forward = forward / np.linalg.norm(forward)
 
-    # Up vector
-    world_up = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+    # World up = -Y (since Y is down in COLMAP)
+    world_up = np.array([0.0, -1.0, 0.0], dtype=np.float64)
     right = np.cross(forward, world_up)
+    if np.linalg.norm(right) < 1e-6:
+        # Degenerate case: looking straight up/down
+        world_up = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+        right = np.cross(forward, world_up)
     right = right / np.linalg.norm(right)
     up = np.cross(right, forward)
+    up = up / np.linalg.norm(up)
 
-    # World-to-camera: R = [right; up; -forward], t = -R @ cam_pos (row-major view matrix)
-    R = np.stack([right, -up, forward], axis=0)  # (3, 3)  (negating up for OpenGL convention)
+    # View matrix (world-to-camera): rows are camera axes in world space
+    # Camera +X = right, +Y = down, +Z = forward
+    R = np.stack([right, -up, forward], axis=0)
     t = -R @ cam_pos
 
     viewmat = torch.eye(4, dtype=torch.float32, device=device)
@@ -205,20 +219,28 @@ def main():
     means_cpu = means.cpu().numpy()
     center = means_cpu.mean(axis=0)
     extent = np.percentile(np.linalg.norm(means_cpu - center, axis=1), 95)
-    cam_distance = extent * 2.5
+    cam_distance = extent * 4.0
     print(f"Scene center: {center}, extent: {extent:.3f}, cam_distance: {cam_distance:.3f}")
+
+    # Inspect per-axis spread to understand scene orientation
+    pct_lo = np.percentile(means_cpu, 5, axis=0)
+    pct_hi = np.percentile(means_cpu, 95, axis=0)
+    print(f"Per-axis 5-95% range:  X [{pct_lo[0]:.3f}, {pct_hi[0]:.3f}]  "
+          f"Y [{pct_lo[1]:.3f}, {pct_hi[1]:.3f}]  Z [{pct_lo[2]:.3f}, {pct_hi[2]:.3f}]")
 
     output_dir = Path(__file__).parent.parent / "output"
     output_dir.mkdir(exist_ok=True)
 
-    # Render from multiple views
+    # Render orbit views with DC-only SH (degree 0) to get clean base colors
+    # (higher SH degrees produce view-dependent effects that look bad at novel views)
     for i, azimuth in enumerate([0, 45, 90, 135, 180, 225, 270, 315]):
         viewmat, K = make_camera(
             img_w, img_h,
             fov_x_deg=60.0,
             cam_distance=cam_distance,
-            elevation_deg=20.0,
+            elevation_deg=25.0,
             azimuth_deg=azimuth,
+            target=center,
             device=device,
         )
 
@@ -230,7 +252,7 @@ def main():
                 background=torch.ones(3, device=device),
                 glob_scale=1.0,
                 clip_thresh=0.01,
-                sh_degree=sh_degree,
+                sh_degree=0,  # DC-only for clean novel views
             )
 
         print(f"  Output shape: {out_img.shape}")
