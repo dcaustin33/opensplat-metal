@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opensplat-metal"
+version = "0.1.0"
+description = "Forward-only Metal gaussian splatting rasterizer for Apple Silicon"
+requires-python = ">=3.10"
+dependencies = ["torch"]
