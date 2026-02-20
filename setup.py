@@ -55,6 +55,10 @@ setup(
                 "-framework", "Metal",
                 "-framework", "MetalKit",
                 "-framework", "Foundation",
+                # Resolve @rpath/libc10.dylib etc. relative to this .so's location.
+                # _C.so is in site-packages/opensplat_metal/, torch libs are in
+                # site-packages/torch/lib/, so one directory up + torch/lib.
+                "-Wl,-rpath,@loader_path/../torch/lib",
             ],
         ),
     ],
