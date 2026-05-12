@@ -43,11 +43,16 @@ def render(
     glob_scale=1.0,
     clip_thresh=0.01,
     sh_degree=None,
+    return_alpha=False,
 ):
     """Render gaussians to an image using the Metal rasterizer.
 
+    Args:
+        return_alpha: if True, also return the per-pixel alpha (1 - final transmittance).
+
     Returns:
-        torch.Tensor: (H, W, 3) rendered image.
+        torch.Tensor: (H, W, 3) rendered image, or
+        (image, alpha) tuple when return_alpha=True, with alpha shape (H, W).
     """
     device = means.device
     N = means.shape[0]
@@ -135,6 +140,9 @@ def render(
     if num_intersects == 0:
         # No visible gaussians, return background
         out = background.unsqueeze(0).unsqueeze(0).expand(img_height, img_width, 3).contiguous()
+        if return_alpha:
+            alpha = torch.zeros(img_height, img_width, dtype=torch.float32, device=device)
+            return out, alpha
         return out
 
     isect_ids, gaussian_ids = map_gaussian_to_intersects(
@@ -158,4 +166,7 @@ def render(
         xys, conics, colors, opacities, background,
     )
 
+    if return_alpha:
+        alpha = (1.0 - final_Ts).clamp(0.0, 1.0)
+        return out_img, alpha  # (H, W, 3), (H, W)
     return out_img  # (H, W, 3)
